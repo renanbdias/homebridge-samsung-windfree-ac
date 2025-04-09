@@ -10,6 +10,13 @@ enum AirConditionerMode {
   Wind = 'wind'
 }
 
+enum FanOscilationMode {
+  Fixed = "fixed",
+  Vertical = "vertical",
+  Horizontal = "horizontal",
+  All = "all"
+}
+
 enum SwitchState {
   On = 'on',
   Off = 'off'
@@ -40,6 +47,7 @@ export class AirConditionerPlatformAccessory {
       'switch',
       'airConditionerMode',
       'thermostatCoolingSetpoint',
+      'fanOscillationMode'
     ];
 
   protected name: string;
@@ -127,6 +135,62 @@ export class AirConditionerPlatformAccessory {
         this.platform.log.debug('Removing Display Switch');
 
         this.accessory.removeService(displaySwitchService);
+      }
+    }
+
+    this.platform.log.debug('Optional Fan Oscilation Modes: ', this.platform.config.OptionalFanOscilationSwitch);
+    if (this.platform.config.OptionalDisplaySwitch) {
+      this.platform.log.debug('Fan Oscilation Mode');
+
+      const verticalSwingMode = 
+      this.accessory.getService('Swing-mode-vertical') ||
+      this.accessory.addService(this.platform.Service.Switch, 'Swing-mode-vertical', `swing-mode-vertical-${accessory.context.device.deviceId}`);
+
+      const horizontalSwingMode = 
+      this.accessory.getService('Swing-mode-horizontal') ||
+      this.accessory.addService(this.platform.Service.Switch, 'Swing-mode-horizontal', `swing-mode-horizontal-${accessory.context.device.deviceId}`);
+
+      const allSwingMode = 
+      this.accessory.getService('Swing-mode-all') ||
+      this.accessory.addService(this.platform.Service.Switch, 'Swing-mode-all', `swing-mode-all-${accessory.context.device.deviceId}`);
+
+      verticalSwingMode.setCharacteristic(this.platform.Characteristic.Name, 'Vertical Swing Mode');
+      horizontalSwingMode.setCharacteristic(this.platform.Characteristic.Name, 'Horizontal Swing Mode');
+      allSwingMode.setCharacteristic(this.platform.Characteristic.Name, 'All Swing Mode');
+
+      verticalSwingMode.getCharacteristic(this.platform.Characteristic.On)
+      .onGet(this.handleVerticalSwingSwitchGet.bind(this))
+      .onSet(this.handleVerticalSwingSwitchSet.bind(this));
+
+      horizontalSwingMode.getCharacteristic(this.platform.Characteristic.On)
+      .onGet(this.handleHorizontalSwingSwitchGet.bind(this))
+      .onSet(this.handleHorizontalSwingSwitchSet.bind(this));
+
+      allSwingMode.getCharacteristic(this.platform.Characteristic.On)
+      .onGet(this.handleAllSwingSwitchGet.bind(this))
+      .onSet(this.handleAllSwingSwitchSet.bind(this));
+
+    } else {
+      const verticalSwingMode = this.accessory.getService('Swing-mode-vertical');
+      const horizontalSwingMode = this.accessory.getService('Swing-mode-horizontal');
+      const allSwingMode = this.accessory.getService('Swing-mode-all');
+
+      if (verticalSwingMode) {
+        this.platform.log.debug('Removing Vertical Switch');
+
+        this.accessory.removeService(verticalSwingMode);
+      }
+
+      if (horizontalSwingMode) {
+        this.platform.log.debug('Removing Horizontal Switch');
+
+        this.accessory.removeService(horizontalSwingMode);
+      }
+
+      if (allSwingMode) {
+        this.platform.log.debug('Removing All Switch');
+
+        this.accessory.removeService(allSwingMode);
       }
     }
   }
@@ -247,6 +311,132 @@ export class AirConditionerPlatformAccessory {
       return currentHeatingCoolingState.HEAT;
     } else {
       return currentHeatingCoolingState.OFF;
+    }
+  }
+
+  private async handleAllSwingSwitchGet(): Promise<CharacteristicValue> {
+    this.platform.log.debug('Triggered GET AllSwingModeSwitch');
+  
+    const deviceStatus = await this.getDeviceStatus();
+    const swingMode = deviceStatus.fanOscilationMode.fanOscillationMode.value as FanOscilationMode;
+  
+    return swingMode === FanOscilationMode.All
+  }
+  
+  private async handleVerticalSwingSwitchGet(): Promise<CharacteristicValue> {
+    this.platform.log.debug('Triggered GET VerticalSwingModeSwitch');
+  
+    const deviceStatus = await this.getDeviceStatus();
+    const swingMode = deviceStatus.fanOscilationMode.fanOscillationMode.value as FanOscilationMode;
+  
+    return swingMode === FanOscilationMode.Vertical
+  }
+  
+  private async handleHorizontalSwingSwitchGet(): Promise<CharacteristicValue> {
+    this.platform.log.debug('Triggered GET HorizontalSwingModeSwitch');
+  
+    const deviceStatus = await this.getDeviceStatus();
+    const swingMode = deviceStatus.fanOscilationMode.fanOscillationMode.value as FanOscilationMode;
+  
+    return swingMode === FanOscilationMode.Horizontal
+  }
+
+  private async handleAllSwingSwitchSet(value: CharacteristicValue) {
+    this.platform.log.debug('Triggered SET AllSwingSwitch:', value);
+  
+    const deviceStatus = await this.getDeviceStatus();
+    const windFreeSwitchStatus = deviceStatus['custom.airConditionerOptionalMode'].acOptionalMode.value as AirConditionerOptionalMode;
+  
+    if (windFreeSwitchStatus === AirConditionerOptionalMode.WindFree) {
+      this.platform.log.debug('AllSwingSwitch is not supported in Windfree mode');
+      return
+    }
+  
+    const response = await fetch(this.commandURL, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + this.platform.config.AccessToken,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        commands: [
+          {
+            capability: 'fanOscillationMode',
+            command: 'setFanOscillationMode',
+            arguments: value ? [FanOscilationMode.All] : [FanOscilationMode.Fixed],
+          },
+        ],
+      }),
+    });
+  
+    if (!response.ok) {
+      this.platform.log.error('Failed to set AllSwingSwitch');
+    }
+  }
+  
+  private async handleVerticalSwingSwitchSet(value: CharacteristicValue) {
+    this.platform.log.debug('Triggered SET VerticalSwingSwitch:', value);
+  
+    const deviceStatus = await this.getDeviceStatus();
+    const windFreeSwitchStatus = deviceStatus['custom.airConditionerOptionalMode'].acOptionalMode.value as AirConditionerOptionalMode;
+  
+    if (windFreeSwitchStatus === AirConditionerOptionalMode.WindFree) {
+      this.platform.log.debug('VerticalSwingSwitch is not supported in Windfree mode');
+      return
+    }
+  
+    const response = await fetch(this.commandURL, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + this.platform.config.AccessToken,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        commands: [
+          {
+            capability: 'fanOscillationMode',
+            command: 'setFanOscillationMode',
+            arguments: value ? [FanOscilationMode.Vertical] : [FanOscilationMode.Fixed],
+          },
+        ],
+      }),
+    });
+  
+    if (!response.ok) {
+      this.platform.log.error('Failed to set VerticalSwingSwitch');
+    }
+  }
+  
+  private async handleHorizontalSwingSwitchSet(value: CharacteristicValue) {
+    this.platform.log.debug('Triggered SET HorizontalSwingSwitch:', value);
+  
+    const deviceStatus = await this.getDeviceStatus();
+    const windFreeSwitchStatus = deviceStatus['custom.airConditionerOptionalMode'].acOptionalMode.value as AirConditionerOptionalMode;
+  
+    if (windFreeSwitchStatus === AirConditionerOptionalMode.WindFree) {
+      this.platform.log.debug('HorizontalSwingSwitch is not supported in Windfree mode');
+      return
+    }
+  
+    const response = await fetch(this.commandURL, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + this.platform.config.AccessToken,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        commands: [
+          {
+            capability: 'fanOscillationMode',
+            command: 'setFanOscillationMode',
+            arguments: value ? [FanOscilationMode.Horizontal] : [FanOscilationMode.Fixed],
+          },
+        ],
+      }),
+    });
+  
+    if (!response.ok) {
+      this.platform.log.error('Failed to set HorizontalSwingSwitch');
     }
   }
 
